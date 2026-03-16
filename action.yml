@@ -30,7 +30,7 @@ runs:
 
         # Resolve version
         if [ "$INPUT_VERSION" = "latest" ]; then
-          VERSION=$(gh release view --repo "$REPO" --json tagName --jq '.tagName' | sed 's/^v//')
+          VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
           echo "Resolved latest version: $VERSION"
         else
           VERSION="$INPUT_VERSION"
