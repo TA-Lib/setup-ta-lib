@@ -1,0 +1,108 @@
+name: 'Setup TA-Lib'
+description: 'Install TA-Lib C library from official GitHub releases for use in CI pipelines'
+branding:
+  icon: 'bar-chart-2'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'TA-Lib version to install (e.g. "0.6.4"). Use "latest" to auto-detect.'
+    required: false
+    default: 'latest'
+
+outputs:
+  version:
+    description: 'The TA-Lib version that was installed'
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install TA-Lib
+      id: install
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        REPO="TA-Lib/ta-lib"
+
+        # Resolve version
+        if [ "$INPUT_VERSION" = "latest" ]; then
+          VERSION=$(gh release view --repo "$REPO" --json tagName --jq '.tagName' | sed 's/^v//')
+          echo "Resolved latest version: $VERSION"
+        else
+          VERSION="$INPUT_VERSION"
+        fi
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Installing TA-Lib $VERSION on $RUNNER_OS ($RUNNER_ARCH)..."
+
+        if [ "$RUNNER_OS" = "Linux" ]; then
+          # Map GitHub runner arch to deb package arch
+          case "$RUNNER_ARCH" in
+            X64)   ARCH="amd64" ;;
+            ARM64) ARCH="arm64" ;;
+            X86)   ARCH="i386" ;;
+            *)     echo "::error::Unsupported Linux architecture: $RUNNER_ARCH"; exit 1 ;;
+          esac
+
+          DEB="ta-lib_${VERSION}_${ARCH}.deb"
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/${DEB}"
+
+          echo "Downloading $URL"
+          curl -fsSL -o "/tmp/$DEB" "$URL"
+          sudo dpkg -i "/tmp/$DEB"
+          sudo ldconfig
+          rm -f "/tmp/$DEB"
+
+        elif [ "$RUNNER_OS" = "macOS" ]; then
+          # No pre-built macOS binaries — build from source tarball
+          SRC="ta-lib-${VERSION}-src.tar.gz"
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/${SRC}"
+
+          echo "Downloading $URL"
+          curl -fsSL -o "/tmp/$SRC" "$URL"
+          tar -xzf "/tmp/$SRC" -C /tmp
+          rm -f "/tmp/$SRC"
+
+          SRC_DIR="/tmp/ta-lib-${VERSION}"
+
+          cd "$SRC_DIR"
+          ./configure --prefix=/usr/local
+          make -j"$(sysctl -n hw.ncpu)"
+          sudo make install
+          cd -
+          rm -rf "$SRC_DIR"
+
+        elif [ "$RUNNER_OS" = "Windows" ]; then
+          case "$RUNNER_ARCH" in
+            X64)   ARCH="x86_64" ;;
+            X86)   ARCH="x86_32" ;;
+            *)     echo "::error::Unsupported Windows architecture: $RUNNER_ARCH"; exit 1 ;;
+          esac
+
+          ZIP="ta-lib-${VERSION}-windows-${ARCH}.zip"
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/${ZIP}"
+          INSTALL_DIR="C:/ta-lib"
+
+          echo "Downloading $URL"
+          curl -fsSL -o "$RUNNER_TEMP/$ZIP" "$URL"
+          mkdir -p "$INSTALL_DIR"
+          unzip -o "$RUNNER_TEMP/$ZIP" -d "$INSTALL_DIR"
+          rm -f "$RUNNER_TEMP/$ZIP"
+
+          # Add to paths so compilers and linkers can find ta-lib
+          echo "$INSTALL_DIR/bin" >> "$GITHUB_PATH"
+          echo "TA_LIBRARY_PATH=$INSTALL_DIR/lib" >> "$GITHUB_ENV"
+          echo "TA_INCLUDE_PATH=$INSTALL_DIR/include" >> "$GITHUB_ENV"
+          echo "LIB=$INSTALL_DIR/lib;${LIB:-}" >> "$GITHUB_ENV"
+          echo "INCLUDE=$INSTALL_DIR/include;${INCLUDE:-}" >> "$GITHUB_ENV"
+
+        else
+          echo "::error::Unsupported OS: $RUNNER_OS"
+          exit 1
+        fi
+
+        echo "TA-Lib $VERSION installed successfully"
