@@ -15,3 +15,11 @@ jobs:
 ```
 
 This will automatically install the latest TA-Lib C release.
+
+If you want to install a particular version, you can:
+
+```yaml
+  - uses: TA-Lib/setup-ta-lib@v1.0.1
+    with:
+      version: 0.6.4
+```
