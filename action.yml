@@ -28,9 +28,18 @@ runs:
 
         REPO="TA-Lib/ta-lib"
 
-        # Resolve version
+        # Resolve version from github.com's documented /releases/latest
+        # redirect rather than api.github.com, which allows 60 requests/hour per
+        # IP and hands a shared runner IP a 403 on a busy hour.
         if [ "$INPUT_VERSION" = "latest" ]; then
-          VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
+          LOCATION=$(curl -fsS --retry 3 -o /dev/null -w '%{redirect_url}' \
+                       "https://github.com/${REPO}/releases/latest")
+          TAG="${LOCATION##*/tag/}"
+          if [ -z "$TAG" ] || [ "$TAG" = "$LOCATION" ]; then
+            echo "::error::cannot resolve the latest ${REPO} release (got '${LOCATION}')"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
           echo "Resolved latest version: $VERSION"
         else
           VERSION="$INPUT_VERSION"
@@ -52,7 +61,7 @@ runs:
           URL="https://github.com/${REPO}/releases/download/v${VERSION}/${DEB}"
 
           echo "Downloading $URL"
-          curl -fsSL -o "/tmp/$DEB" "$URL"
+          curl -fsSL --retry 3 -o "/tmp/$DEB" "$URL"
           sudo dpkg -i "/tmp/$DEB"
           sudo ldconfig
           rm -f "/tmp/$DEB"
@@ -63,7 +72,7 @@ runs:
           URL="https://github.com/${REPO}/releases/download/v${VERSION}/${SRC}"
 
           echo "Downloading $URL"
-          curl -fsSL -o "/tmp/$SRC" "$URL"
+          curl -fsSL --retry 3 -o "/tmp/$SRC" "$URL"
           tar -xzf "/tmp/$SRC" -C /tmp
           rm -f "/tmp/$SRC"
 
@@ -88,7 +97,7 @@ runs:
           INSTALL_DIR="C:/ta-lib"
 
           echo "Downloading $URL"
-          curl -fsSL -o "$RUNNER_TEMP/$ZIP" "$URL"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ZIP" "$URL"
           mkdir -p "$INSTALL_DIR"
           unzip -o "$RUNNER_TEMP/$ZIP" -d "$INSTALL_DIR"
           rm -f "$RUNNER_TEMP/$ZIP"
